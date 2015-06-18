@@ -15,6 +15,7 @@ class LaunchCalculator(object):
     EARTH_MEAN_RADIUS = 6371000     # m
     GRAVITY_SEA_LEVEL = 9.80665     # m/s^2
     AIR_DENSITY_SEA_LEVEL = 1.223   # kg/m^3
+    UNIVERSAL_GAS_CONSTANT = 286.9  # J/kg K
 
     def __init__(self, *args, **kwargs):
 
@@ -74,15 +75,35 @@ class LaunchCalculator(object):
         required_lift = float(0.5 * air_density * speed2 * wing_area * lift_coefficient)
         return required_lift
 
-    def calculate_air_density(self, elevation, air_temp, pressure, dew_point):
-        pass
+    def calculate_air_density(self, elevation):
+        """
+        Estimate the air density at the given altitude (kg/m^3) (mass per metre cubed (volume))
+        :param elevation: m
+        :return:
+        """
+
+        p0 = 101325.0
+        T0 = 288.15
+        L = 0.0065
+        R = 8.31447
+        M = 0.0289644
+
+        temp_at_altitude = 288.15 - float(0.0065 * elevation)
+        exponent = float(self.GRAVITY_SEA_LEVEL * M) / float(R * L)
+        internal = 1 - ((L*float(elevation))/T0)
+        pressure_at_altitude = p0 * math.pow(float(internal), exponent)
+        density = float(pressure_at_altitude * 0.0289644) / float(8.31447 * temp_at_altitude)
+
+        return density
 
     def altitude_at_burnout(self, thrust, mass, initial_y, drag_coefficient, area, burn_time):
+
+        air_density = self.calculate_air_density(initial_y)
 
         T = float(thrust)
         m = float(mass)
         g = self.gravity_at_altitude(initial_y)
-        k = self.calculate_k(self.AIR_DENSITY_SEA_LEVEL, drag_coefficient, area)
+        k = self.calculate_k(air_density, drag_coefficient, area)
         t = float(burn_time)
 
         q = float(math.sqrt((T - (m*g)) / k))
@@ -110,11 +131,14 @@ class LaunchCalculator(object):
         k = float(0.5 * air_density * drag_coefficient * area)
         return k
 
+    
 
 
 
 if __name__ == "__main__":
     calculator = LaunchCalculator(thrust=17792.8864, burn_time=8.0, mass=14.80118, area=0.129717, initial_y=6095.9998)
+
+    # print "density = " + str(calculator.calculate_air_density(0.0))
 
     print calculator.altitude_at_burnout(17792.8864, 14.80118, 6095.9998, 0.75, 0.129717, 8.0)
 
