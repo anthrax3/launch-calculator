@@ -6,3 +6,5 @@
  
  * Gravity at altitude
  * Required lift given air density
+ * Burn-out altitude calculation
+ * Vertical coasting calculation (burnout + coasting = total altitude)
