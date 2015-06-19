@@ -26,26 +26,28 @@ class LaunchCalculator(object):
         #   area (m^2)      : Cross sectional area of the largest part of the rocket (usually a circle)
         #   initial_y (m)   : Initial altitude of rocket when launched (sea level is 0m)
         #   burn_time (s)   : Time that the rocket's engine is burning / expelling exhaust and producing thrust
+        #   drag_coeff      : The drag coefficient for the rocket / object. Common Cd for a rocket is 0.75
 
         self.weight = None
         self.mass = None
-        self.initial_y = 0.0
+        self.initial_altitude = 0.0
 
         try:
             self.thrust = float(kwargs.get('thrust'))
             self.area = float(kwargs.get('area'))
             self.burn_time = float(kwargs.get('burn_time'))
+            self.drag_coefficient = float(kwargs.get('drag_coefficient'))
         except Exception as e:
             raise CalculatorParameterException(e.message)
 
-        if 'initial_y' in kwargs:
-            self.initial_y = float(kwargs.get('initial_y'))
+        if 'initial_altitude' in kwargs:
+            self.initial_altitude = float(kwargs.get('initial_altitude'))
 
         if 'mass' in kwargs:
             self.mass = float(kwargs.get('mass'))
 
         elif 'weight' in kwargs:
-            self.mass = float(kwargs.get('weight')) / self.GRAVITY_SEA_LEVEL
+            self.mass = float(kwargs.get('weight')) / self.gravity_at_altitude(self.initial_altitude)
 
         else:
             raise CalculatorParameterException('Either mass or weight has to be specified in parameters.')
@@ -87,35 +89,29 @@ class LaunchCalculator(object):
         L = 0.0065
         R = 8.31447
         M = 0.0289644
+        g = self.gravity_at_altitude(elevation)
 
         temp_at_altitude = 288.15 - float(0.0065 * elevation)
-        exponent = float(self.GRAVITY_SEA_LEVEL * M) / float(R * L)
+        exponent = float(g * M) / float(R * L)
         internal = 1 - ((L*float(elevation))/T0)
         pressure_at_altitude = p0 * math.pow(float(internal), exponent)
         density = float(pressure_at_altitude * 0.0289644) / float(8.31447 * temp_at_altitude)
 
         return density
 
-    def altitude_at_burnout(self, thrust, mass, initial_y, drag_coefficient, area, burn_time):
+    def calculate_v(self, x, t, q):
+        v0 = float(1 - math.pow(math.e, -x * t))
+        v1 = float(1 + math.pow(math.e, -x * t))
+        v = q * (v0 / v1)
+        return v
 
-        air_density = self.calculate_air_density(initial_y)
-
-        T = float(thrust)
-        m = float(mass)
-        g = self.gravity_at_altitude(initial_y)
-        k = self.calculate_k(air_density, drag_coefficient, area)
-        t = float(burn_time)
-
-        q = float(math.sqrt((T - (m*g)) / k))
+    def calculate_x(self, k, q, m):
         x = float((2 * k * q) / m)
-        v = q * ((1 - math.pow(math.e, -x * t)) / (1 + math.pow(math.e, -x * t)))
+        return x
 
-        # Thrust, mass, speed variable
-        tms = (T - (m * g) - (k * math.pow(v, 2))) / (T - (m * g))
-
-        burnout_altitude = (-m / (2 * k)) * math.log(tms)
-
-        return burnout_altitude
+    def calculate_q(self, T, m, g, k):
+        q = float(math.sqrt((T - (m * g)) / k))
+        return q
 
     def calculate_k(self, air_density, drag_coefficient, area):
         """
@@ -131,16 +127,71 @@ class LaunchCalculator(object):
         k = float(0.5 * air_density * drag_coefficient * area)
         return k
 
-    
+    def altitude_at_burnout(self, launch_elevation):
 
+        air_density = self.calculate_air_density(launch_elevation)
+
+        T = float(self.thrust)
+        m = float(self.mass)
+        g = self.gravity_at_altitude(launch_elevation)
+        k = self.calculate_k(air_density, self.drag_coefficient, self.area)
+        t = float(self.burn_time)
+
+        q = self.calculate_q(T, m, g, k)
+        x = self.calculate_x(k, q, m)
+        v = self.calculate_v(x, t, q)
+
+        # Thrust, mass, speed variable
+        tms = (T - (m * g) - (k * math.pow(v, 2))) / (T - (m * g))
+
+        mk_coefficient = float(-m / (2 * k))
+        burnout_altitude = mk_coefficient * math.log(tms)
+
+        # Return the combined initial launch altitude and the burnout altitude
+        return burnout_altitude + launch_elevation
+
+    def calculate_coasting_distance(self, current_altitude):
+
+        air_density = self.calculate_air_density(current_altitude)
+
+        T = self.thrust
+        g = self.gravity_at_altitude(current_altitude)
+        m = float(self.mass)
+        k = self.calculate_k(air_density, self.drag_coefficient, self.area)
+        t = self.burn_time
+
+        q = self.calculate_q(T, m, g, k)
+        x = self.calculate_x(k, q, m)
+        v = self.calculate_v(x, t, q)
+
+        coefficient = float(m / (2 * k))
+        internal = float(m * g + k * math.pow(v, 2)) / float(m * g)
+
+        coasting_distance = coefficient * math.log(internal)
+        return coasting_distance
 
 
 if __name__ == "__main__":
-    calculator = LaunchCalculator(thrust=17792.8864, burn_time=8.0, mass=14.80118, area=0.129717, initial_y=6095.9998)
 
-    # print "density = " + str(calculator.calculate_air_density(0.0))
+    params = {
+        'drag_coefficient' : 0.75,
+        'thrust': 17792.8864,
+        'burn_time': 8.0,
+        'mass': 14.80118,
+        'area': 0.129717,
+        'initial_altitude': 6095.9998,
+    }
 
-    print calculator.altitude_at_burnout(17792.8864, 14.80118, 6095.9998, 0.75, 0.129717, 8.0)
+    calculator = LaunchCalculator(**params)
+
+    # Launching at 20,000 ft, of 6095.9998 meters
+    burnout_altitude = calculator.altitude_at_burnout(6095.9998)
+    coasting_distance = calculator.calculate_coasting_distance(burnout_altitude)
+
+    print "Burn-out Altitude: " + str(burnout_altitude) + " meters"
+    print "Coasting Distance: " + str(coasting_distance) + " meters"
+
+    print "Final Launch Altitude: " + str(burnout_altitude + coasting_distance) + " meters"
 
 
 
